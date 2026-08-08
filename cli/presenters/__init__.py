@@ -1,0 +1,2 @@
+"""Terminal-only output adapters."""
+

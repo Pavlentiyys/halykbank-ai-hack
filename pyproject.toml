@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "covenant-agent"
+version = "0.1.0"
+description = "Core/CLI covenant compliance agent"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "PyMuPDF>=1.24,<2",
+]
+
+[project.optional-dependencies]
+cli = ["rich>=13,<15"]
+train = [
+  "mlx>=0.25; platform_system == 'Darwin' and platform_machine == 'arm64'",
+  "mlx-lm>=0.24; platform_system == 'Darwin' and platform_machine == 'arm64'",
+]
+dev = ["pytest>=8,<9"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["model", "cli", "training"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+

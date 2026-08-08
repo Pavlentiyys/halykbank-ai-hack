@@ -1,0 +1,30 @@
+# Секреты и локальная конфигурация
+.env
+
+# Окружения и сборка
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Кэши инструментов
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.llm_cache/
+.text_cache/
+
+# Выходные данные прогонов: веса, адаптеры, обучающий корпус
+artifacts/
+tmp/
+submission.json
+
+# Рабочие заметки
+AGENTS.md
+
+# Мусор ОС
+.DS_Store
+Thumbs.db
+desktop.ini
