@@ -6,26 +6,34 @@ import hashlib
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Mapping
+from typing import Dict, Iterable, List, Mapping
 
 from model import DatasetRef, Settings, build_pipeline
 from model.ensemble.numeric import extract_threshold
 from model.services.metrics import category_for
 
-_SPLIT = {
-    "P1": "train",
-    "P2": "train",
-    "P3": "train",
-    "P4": "train",
-    "P5": "train",
-    "P6": "train",
-    "P7": "train",
-    "P8": "train",
-    "P9": "valid",
-    "P10": "valid",
-    "B1": "test",
-    "B4": "test",
-}
+_SPLIT_RATIOS = (("train", 0.70), ("valid", 0.15))
+
+
+def assign_splits(scenario_ids: Iterable[str]) -> Dict[str, str]:
+    """Split borrowers deterministically, without assuming a particular dataset."""
+    ordered = sorted(scenario_ids)
+    total = len(ordered)
+    if total == 0:
+        return {}
+    train_end = max(1, round(total * _SPLIT_RATIOS[0][1]))
+    valid_end = min(total, max(train_end + 1, round(total * (_SPLIT_RATIOS[0][1] + _SPLIT_RATIOS[1][1]))))
+    if valid_end >= total:
+        valid_end = max(train_end, total - 1)
+    assignment: Dict[str, str] = {}
+    for index, scenario_id in enumerate(ordered):
+        if index < train_end:
+            assignment[scenario_id] = "train"
+        elif index < valid_end:
+            assignment[scenario_id] = "valid"
+        else:
+            assignment[scenario_id] = "test"
+    return assignment
 
 
 def _message(system: str, user: str, answer: Mapping[str, object]) -> Dict[str, object]:
@@ -148,9 +156,10 @@ def prepare_training_data(
         "test": [],
     }
     scenario_counts: Dict[str, int] = {}
+    splits = assign_splits(contexts)
     for scenario_id, context in contexts.items():
         examples = _examples_for_context(context)
-        split_examples[_SPLIT[scenario_id]].extend(examples)
+        split_examples[splits[scenario_id]].extend(examples)
         scenario_counts[scenario_id] = len(examples)
 
     output_dir.mkdir(parents=True, exist_ok=True)

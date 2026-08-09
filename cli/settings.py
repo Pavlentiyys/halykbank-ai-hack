@@ -51,5 +51,5 @@ def load_settings(args: Namespace) -> Settings:
         cache_dir=None if args.no_cache else Path(value("LLM_CACHE_DIR", ".llm_cache")),
         team=team,
         contact_email=email,
-        model_name="{} + numeric".format(model_id),
+        model_name="{} + numeric".format(model_id) if enabled else "offline numeric",
     )

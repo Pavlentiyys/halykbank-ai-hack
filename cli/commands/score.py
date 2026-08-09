@@ -46,8 +46,10 @@ def score(submission_path: Path, key_path: Path) -> Tuple[float, List[Tuple[obje
 
 def score_command(submission_path: Path, key_path: Path) -> int:
     total, rows = score(submission_path, key_path)
-    for row in rows[:12]:
+    losing = [row for row in rows if row[2] < 1.0]
+    for row in losing:
         print("  {:4} {}  {:.2f}  дали={} ключ={}".format(*row))
+    if not losing:
+        print("  все ячейки совпали с ключом")
     print("\nИТОГО {:.2f} / {} = {:.1f}%".format(total, len(rows), total / len(rows) * 100))
     return 0
-

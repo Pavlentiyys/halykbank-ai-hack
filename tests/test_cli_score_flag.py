@@ -3,17 +3,28 @@ from pathlib import Path
 from cli.__main__ import build_parser
 
 
-def test_run_score_flag_uses_default_ground_truth() -> None:
-    args = build_parser().parse_args(["run", "--score"])
+def test_run_defaults_to_private_dataset() -> None:
+    args = build_parser().parse_args(["run"])
 
-    assert args.show_score is True
-    assert args.key == Path("ground_truth.json")
+    assert args.dataset_mode == "private"
+    assert args.input is None
 
 
-def test_run_show_score_alias_and_custom_key() -> None:
-    args = build_parser().parse_args(
-        ["run", "--show-score", "--key", "data/private/ground_truth.json"]
-    )
+def test_run_public_selects_public_dataset() -> None:
+    args = build_parser().parse_args(["run", "--public"])
 
-    assert args.show_score is True
-    assert args.key == Path("data/private/ground_truth.json")
+    assert args.dataset_mode == "public"
+    assert args.input is None
+
+
+def test_run_private_selects_private_dataset() -> None:
+    args = build_parser().parse_args(["run", "--private"])
+
+    assert args.dataset_mode == "private"
+    assert args.input is None
+
+
+def test_run_accepts_custom_dataset() -> None:
+    args = build_parser().parse_args(["run", "--input", "data/custom"])
+
+    assert args.input == Path("data/custom")

@@ -5,7 +5,7 @@ from model import CovenantAnswer, Submission
 
 
 def test_serialization_matches_template_keys() -> None:
-    template = json.loads(Path("submission_template.json").read_text(encoding="utf-8"))
+    template = json.loads(Path("public/submission_template.json").read_text(encoding="utf-8"))
     answers = tuple(
         CovenantAnswer(
             scenario_id=scenario_id,
@@ -28,4 +28,3 @@ def test_serialization_matches_template_keys() -> None:
                 "actual": 1.23,
                 "evidence_txn_id": None,
             }
-

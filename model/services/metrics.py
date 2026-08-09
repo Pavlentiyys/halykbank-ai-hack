@@ -62,14 +62,61 @@ def quarter(transactions: Iterable[Txn], number: int) -> Tuple[Txn, ...]:
     return tuple(txn for txn in transactions if start_month <= txn.date.month <= start_month + 2)
 
 
+CAPTION_CATEGORIES = (
+    ("маркетинговые расходы", "marketing"),
+    ("капитальные затраты", "capex"),
+    ("операционные расходы", "operating"),
+    ("расходы на оплату труда", "personnel"),
+    ("коммунальные услуги", "utilities"),
+    ("страховые премии", "insurance"),
+    ("процентные расходы", "interest"),
+    ("арендные платежи", "rent"),
+    ("консультационные услуги", "consulting"),
+    ("выручка", "revenue"),
+    ("налоги", "taxes"),
+)
+
+
+def category_from_caption(caption: str) -> str:
+    """Map a covenant/audit line caption onto a ledger category."""
+    text = caption.casefold().strip(" «»\"")
+    for marker, category in CAPTION_CATEGORIES:
+        if marker in text:
+            return category
+    return "other"
+
+
 def category_for(description: str) -> str:
     text = description.casefold()
-    if "sales settlement" in text:
+    if any(
+        token in text
+        for token in ("sales settlement", "sales —", "sales -", "subscription revenue", "interconnect revenue")
+    ):
         return "revenue"
-    if "facility drawdown" in text or "loan proceeds" in text:
+    if "principal repayment" in text:
+        return "debt_principal"
+    if any(
+        token in text
+        for token in (
+            "facility drawdown",
+            "loan proceeds",
+            "loan drawdown",
+            "term loan drawdown",
+            "promissory note proceeds",
+            "note proceeds",
+        )
+    ) or ("drawdown" in text and any(token in text for token in ("syndicated", "tranche", "working-capital", "working capital"))):
         return "financing"
-    if "purchase of " in text and any(
-        token in text for token in ("equipment", "rig", "conveyor", "generator", "plant")
+    if "transfer" in text and any(
+        token in text for token in ("subsidiar", "group entity", "intra-group", "transfer of")
+    ):
+        return "subsidiary_transfer"
+    if (
+        "purchase of " in text
+        and any(token in text for token in ("equipment", "rig", "conveyor", "generator", "plant"))
+    ) or (
+        any(token in text for token in ("equipment", "machinery", "network installation", "backbone"))
+        and not any(token in text for token in ("lease", "rental", " rent", "rent ", "interest"))
     ):
         return "capex"
     if "insurance" in text or "premium" in text:
@@ -101,10 +148,35 @@ def category_for(description: str) -> str:
         return "rent"
     if "operating" in text or "servicing" in text or "maintenance expenses" in text:
         return "operating"
-    if "management advisory" in text or "advisory engagement" in text:
+    if any(
+        token in text
+        for token in (
+            "management advisory",
+            "advisory engagement",
+            "advisory retainer",
+            "advisory settlement",
+            "strategy consulting",
+            "consulting engagement",
+            "consulting fees",
+            "consulting retainer",
+            "management retainer",
+        )
+    ):
         return "consulting"
-    if "transfer" in text and "subsidiar" in text:
-        return "subsidiary_transfer"
+    if any(
+        token in text
+        for token in (
+            "marketing",
+            "ad campaign",
+            "advertising",
+            "media buy",
+            "billboard",
+            "outdoor media",
+            "exhibition stand",
+            "sponsorship",
+        )
+    ):
+        return "marketing"
     return "other"
 
 

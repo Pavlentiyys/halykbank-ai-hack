@@ -2,32 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from model.config import Settings
-from model.domain.ledger import Txn
+from model.domain.ledger import Ledger, Txn
 from model.domain.types import BorrowerContext, DatasetRef, DocumentRef, PageChunk
 from model.ports.extraction import LedgerRepository, TextExtractor
-from model.services.metrics import aggregate_metrics
-
-SCENARIO_ACCOUNTS: Mapping[str, str] = {
-    "P1": "ACC-7801",
-    "P2": "ACC-7802",
-    "P3": "ACC-7803",
-    "P4": "ACC-7804",
-    "P5": "ACC-7805",
-    "P6": "ACC-7806",
-    "P7": "ACC-7807",
-    "P8": "ACC-7808",
-    "P9": "ACC-7809",
-    "P10": "ACC-7810",
-    "B1": "ACC-7201",
-    "B4": "ACC-7204",
-}
-
+from model.services.metrics import aggregate_metrics, category_from_caption
 
 @dataclass(frozen=True)
 class _Document:
@@ -41,52 +26,110 @@ def _compact(text: str) -> str:
     return " ".join(text.split())
 
 
+def _despace(text: str) -> str:
+    """Drop every space so letter-spaced headings become searchable."""
+    return text.replace(" ", "")
+
+
 def classify_document(pages: Sequence[PageChunk]) -> str:
     text = _compact("\n".join(page.text for page in pages))
     head = text[:5000]
-    if "НЕДЕЙСТВУЮЩАЯ РЕДАКЦИЯ" in head or "НЕ ПРИМЕНЯЕТСЯ" in head:
+    dense_head = _despace(head).upper()
+    if (
+        "НЕДЕЙСТВУЮЩАЯ РЕДАКЦИЯ" in head
+        or "НЕ ПРИМЕНЯЕТСЯ" in head
+        or ("SUPERSEDED" in head and "NOT OPERATIVE" in head)
+    ):
         return "inactive_contract"
-    if "ДОГОВОР БАНКОВСКОГО ЗАЙМА" in head or "Д О Г О В О Р Б А Н К О В С К О Г О З А Й М А" in head:
+    if (
+        "ДОГОВОР БАНКОВСКОГО ЗАЙМА" in head
+        or "Д О Г О В О Р Б А Н К О В С К О Г О З А Й М А" in head
+        or "CREDIT AGREEMENT" in head
+    ):
         return "active_contract"
-    if "НЕ ЯВЛЯЕТСЯ ОКОНЧАТЕЛЬНОЙ ПОЗИЦИЕЙ АУДИТОРА" in head:
+    if (
+        "НЕ ЯВЛЯЕТСЯ ОКОНЧАТЕЛЬНОЙ ПОЗИЦИЕЙ АУДИТОРА" in head
+        or "NOT THE AUDITOR'S CONCLUDED POSITION" in head
+    ):
         return "interim_workpaper"
-    if "ДОПОЛНЕНИЕ О СОБЛЮДЕНИИ КОВЕНАНТОВ" in text:
+    if (
+        "ДОПОЛНЕНИЕ О СОБЛЮДЕНИИ КОВЕНАНТОВ" in text
+        or "AUDITOR'S FILE COPY" in head
+        or "A U D I T O R ' S F I L E C O P Y" in head
+        or "AUDIT FILE REF" in head
+        or "ЭКЗЕМПЛЯРАУДИТОРА" in dense_head
+        or "СОГЛАСОВАННЫХПРОЦЕДУР" in _despace(text).upper()
+        or "AGREED-UPONREVIEWPROCEDURES" in _despace(text).upper()
+    ):
         return "final_audit"
-    if "Доля голосующих прав" in text or ("Досье" in head and "KYC" in head):
+    if (
+        "Доля голосующих прав" in text
+        or ("Досье" in head and "KYC" in head)
+        or "KNOW YOUR CUSTOMER" in head.upper()
+    ):
         return "kyc"
-    if "СЛУЖЕБНАЯ ЗАПИСКА КАЗНАЧЕЙСТВА" in text:
+    if "СЛУЖЕБНАЯ ЗАПИСКА КАЗНАЧЕЙСТВА" in text or "TREASURY MEMORANDUM" in head.upper():
         return "treasury_memo"
     return "other"
 
 
-def extract_covenants(text: str) -> Dict[str, str]:
+def extract_covenants(
+    text: str,
+    covenant_ids: Sequence[str] = (),
+) -> Dict[str, str]:
     compact = _compact(text)
-    start = compact.find("6.1")
-    end = compact.find("Статья 7", start)
-    if start < 0:
-        return {}
-    block = compact[start : end if end >= 0 else len(compact)]
-    markers = {
-        "6.1": 0,
-        "6.2": block.find("Пункт 6.2"),
-        "6.3": block.find("Пункт 6.3"),
-    }
-    if markers["6.2"] < 0 or markers["6.3"] < 0:
-        return {}
-    return {
-        "6.1": block[: markers["6.2"]].strip(),
-        "6.2": block[markers["6.2"] : markers["6.3"]].strip(),
-        "6.3": block[markers["6.3"] :].strip(),
-    }
+    wanted = set(covenant_ids)
+    marker_pattern = re.compile(r"(?:Пункт|Section)\s+(\d+\.\d+)\b", re.IGNORECASE)
+    article_pattern = re.compile(r"(?:Статья\s+\d+|Article\s+[IVXLCDM]+)\s*[—-]")
+    markers = list(marker_pattern.finditer(compact))
+    articles = list(article_pattern.finditer(compact))
+    clauses: Dict[str, str] = {}
+    for index, marker in enumerate(markers):
+        covenant_id = marker.group(1)
+        if wanted and covenant_id not in wanted:
+            continue
+        if not wanted and covenant_id.split(".", 1)[0] not in {"5", "6"}:
+            continue
+        possible_ends = [
+            candidate.start()
+            for candidate in markers[index + 1 :] + articles
+            if candidate.start() > marker.start()
+        ]
+        end = min(possible_ends, default=len(compact))
+        clauses.setdefault(covenant_id, compact[marker.start() : end].strip())
+    return clauses
+
+
+def scenario_accounts(
+    ledger: Ledger,
+    scenario_ids: Iterable[str],
+) -> Dict[str, str]:
+    """Infer scenario-to-account mapping from transaction IDs in the current dataset."""
+    result: Dict[str, str] = {}
+    for scenario_id in scenario_ids:
+        prefix = "TXN-{}-".format(scenario_id)
+        accounts = {
+            txn.account_id for txn in ledger.transactions if txn.txn_id.startswith(prefix)
+        }
+        if len(accounts) != 1:
+            raise ValueError(
+                "scenario {} must map to exactly one account, found {}".format(
+                    scenario_id,
+                    sorted(accounts),
+                )
+            )
+        result[scenario_id] = accounts.pop()
+    return result
 
 
 def extract_related_parties(
     text: str, fallback_threshold: Decimal
 ) -> Tuple[str, ...]:
     compact = _compact(text)
+    narrated = _narrated_related_parties(compact)
     marker = compact.find("Доля голосующих прав")
     if marker < 0:
-        return ()
+        return narrated
     end = compact.find("Организации, в которых", marker)
     table = compact[marker + len("Доля голосующих прав") : end if end >= 0 else marker + 800]
     threshold_match = re.search(
@@ -107,7 +150,23 @@ def extract_related_parties(
         if name and share >= threshold:
             parties.append(name.strip())
         cursor = match.end()
-    return tuple(parties)
+    return tuple(dict.fromkeys(parties + list(narrated)))
+
+
+def _narrated_related_parties(compact: str) -> Tuple[str, ...]:
+    """KYC files that name affiliates in prose instead of a share table."""
+    parties = []
+    for match in re.finditer(
+        r"Контрагент\s*«([^»]{2,80})»\s*классифицирован\w*\s+как\s+([^.]{0,80})",
+        compact,
+        flags=re.IGNORECASE,
+    ):
+        verdict = match.group(2).casefold()
+        if "не " in verdict.split("аффилирован")[0]:
+            continue
+        if "аффилированн" in verdict or "связанн" in verdict:
+            parties.append(match.group(1).strip())
+    return tuple(dict.fromkeys(parties))
 
 
 def _recover_missing_amount(txn: Txn, documents: Iterable[_Document]) -> Txn:
@@ -120,12 +179,16 @@ def _recover_missing_amount(txn: Txn, documents: Iterable[_Document]) -> Txn:
             continue
         window = compact[index : index + 500]
         match = re.search(
-            r"фактическая сумма операции составляет\s*\$([0-9][0-9,]*(?:\.[0-9]+)?)",
+            r"фактическая сумма операции составляет\s*\$([0-9][0-9,]*(?:\.[0-9]+)?)"
+            r"\s*(?:\(([^)]{0,40})\))?",
             window,
             flags=re.IGNORECASE,
         )
         if match:
-            return txn.with_amount(-Decimal(match.group(1).replace(",", "")))
+            amount = Decimal(match.group(1).replace(",", ""))
+            qualifier = (match.group(2) or "").casefold()
+            incoming = "поступлен" in qualifier or "receipt" in qualifier
+            return txn.with_amount(amount if incoming else -amount)
     return txn
 
 
@@ -137,23 +200,53 @@ def _apply_disclosed_fx(
     if txn.amount is None or txn.currency != "EUR":
         return txn
     for document in documents:
-        if document.kind != "final_audit":
+        if document.kind not in {"final_audit", "treasury_memo"}:
             continue
         compact = _compact(document.text)
         if txn.counterparty not in compact:
             continue
-        match = re.search(
-            r"счёт на сумму\s*([0-9][0-9,]*\.[0-9]+)\s*EUR.{0,180}?в размере\s*\$([0-9][0-9,]*\.[0-9]+)",
-            compact,
-            flags=re.IGNORECASE,
-        )
-        if match:
-            eur = Decimal(match.group(1).replace(",", ""))
-            usd = Decimal(match.group(2).replace(",", ""))
-            if eur and configured_fx:
-                raw = txn.amount / configured_fx
-                return txn.with_amount(raw * (usd / eur))
+        rate = _disclosed_rate(compact)
+        if rate is not None and configured_fx:
+            raw = txn.amount / configured_fx
+            return txn.with_amount(raw * rate)
     return txn
+
+
+def _disclosed_rate(compact: str) -> Optional[Decimal]:
+    """Recover an EUR/USD rate from a settlement disclosure or an explicit quote."""
+    explicit = re.search(
+        r"1\s*EUR\s*=\s*\$?\s*([0-9]+\.[0-9]+)", compact, flags=re.IGNORECASE
+    )
+    if explicit:
+        return Decimal(explicit.group(1))
+
+    settlement = re.search(
+        r"(?:счёт на сумму|invoice of)\s*([0-9][0-9,]*\.[0-9]+)\s*EUR"
+        r"(.{0,400}?)(?:в размере|payment of)\s*\$?([0-9][0-9,]*\.[0-9]+)",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if not settlement:
+        return None
+    eur = Decimal(settlement.group(1).replace(",", ""))
+    usd = Decimal(settlement.group(3).replace(",", ""))
+    if not eur:
+        return None
+
+    tail = settlement.group(2) + compact[settlement.end() : settlement.end() + 400]
+    charge = re.search(
+        r"(?:банковской комиссии|bank charge)[^$]{0,80}\$?([0-9][0-9,]*\.[0-9]+)",
+        tail,
+        flags=re.IGNORECASE,
+    )
+    excluded = re.search(
+        r"не входит в пересчитываемую сумму|stated net of|net of a correspondent",
+        tail,
+        flags=re.IGNORECASE,
+    )
+    if charge and excluded:
+        usd += Decimal(charge.group(1).replace(",", ""))
+    return usd / eur
 
 
 def _excluded_transactions(documents: Iterable[_Document]) -> Tuple[str, ...]:
@@ -184,7 +277,15 @@ def _category_name(text: str) -> str:
         return "capex"
     if "оплат" in value and "труд" in value:
         return "personnel"
-    return "other"
+    if "маркетинг" in value or "реклам" in value:
+        return "marketing"
+    if "консультацион" in value:
+        return "consulting"
+    if "аренд" in value:
+        return "rent"
+    if "коммунальн" in value:
+        return "utilities"
+    return category_from_caption(value)
 
 
 def _category_overrides(
@@ -259,6 +360,32 @@ def _document_only_metrics(documents: Iterable[_Document]) -> Dict[str, Decimal]
         )
         if match:
             result["severance_obligation"] = Decimal(match.group(1).replace(",", ""))
+
+        for single in re.finditer(
+            r"Операция\s+TXN-[A-Z0-9-]+\s*\(\$([0-9][0-9,]*\.[0-9]+)\)[^.]{0,120}?"
+            r"разов\w*\s+стать\w*[^.]{0,80}?EBITDA",
+            compact,
+            flags=re.IGNORECASE,
+        ):
+            amount = Decimal(single.group(1).replace(",", ""))
+            result["one_time_addback"] = result.get("one_time_addback", Decimal("0")) + amount
+
+        for disclosure in re.finditer(
+            r"([^.]{0,160}?)\s*в размере\s*\$([0-9][0-9,]*\.[0-9]+)[^.]{0,160}?"
+            r"не отражается отдельной операцией",
+            compact,
+            flags=re.IGNORECASE,
+        ):
+            subject = disclosure.group(1).casefold()
+            amount = Decimal(disclosure.group(2).replace(",", ""))
+            if "поручительств" in subject or "гарант" in subject:
+                result["guarantee_obligations"] = (
+                    result.get("guarantee_obligations", Decimal("0")) + amount
+                )
+            elif any(token in subject for token in ("овердрафт", "overdraft", "вексел", "кредитн", "заём", "займ")):
+                result["undisclosed_debt"] = (
+                    result.get("undisclosed_debt", Decimal("0")) + amount
+                )
         group_capex = re.search(
             r"капитальн(?:ые|ых) затрат(?:ы)? Группы.{0,120}?\$([0-9][0-9,]*\.[0-9]+)",
             compact,
@@ -280,6 +407,9 @@ class BorrowerContextBuilder:
         ledger_repository: LedgerRepository,
     ) -> Dict[str, BorrowerContext]:
         ledger = ledger_repository.load(dataset.resolve("master_ledger_2025.csv"))
+        with dataset.resolve("submission_template.json").open("r", encoding="utf-8") as handle:
+            template_answers = json.load(handle)["answers"]
+        accounts = scenario_accounts(ledger, template_answers)
         document_dir = dataset.resolve("documents")
         extracted: List[_Document] = []
         for path in sorted(document_dir.glob("*.pdf")):
@@ -288,13 +418,17 @@ class BorrowerContextBuilder:
             extracted.append(_Document(path.name, pages, text, classify_document(pages)))
 
         contexts: Dict[str, BorrowerContext] = {}
-        for scenario_id, account_id in SCENARIO_ACCOUNTS.items():
+        for scenario_id, account_id in accounts.items():
             borrower_docs = tuple(doc for doc in extracted if account_id in doc.text)
             pages = tuple(page for doc in borrower_docs for page in doc.pages)
             kinds = {doc.name: doc.kind for doc in borrower_docs}
             active = next((doc for doc in borrower_docs if doc.kind == "active_contract"), None)
             kyc = next((doc for doc in borrower_docs if doc.kind == "kyc"), None)
-            covenant_texts = extract_covenants(active.text) if active else {}
+            covenant_texts = (
+                extract_covenants(active.text, tuple(template_answers[scenario_id]))
+                if active
+                else {}
+            )
             related_parties = extract_related_parties(
                 kyc.text if kyc else "",
                 self._settings.ensemble.related_party_threshold,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 
-
 class RichProgressSink:
     def __init__(self) -> None:
         self._progress = None
@@ -11,9 +10,24 @@ class RichProgressSink:
 
     def __enter__(self) -> "RichProgressSink":
         try:
-            from rich.progress import Progress
+            from rich.progress import (
+                BarColumn,
+                MofNCompleteColumn,
+                Progress,
+                SpinnerColumn,
+                TaskProgressColumn,
+                TextColumn,
+                TimeElapsedColumn,
+            )
 
-            self._progress = Progress()
+            self._progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+            )
             self._progress.start()
         except ImportError:
             self._progress = None
@@ -34,4 +48,3 @@ class RichProgressSink:
             self._progress.update(self._task, completed=completed, description=item)
         else:
             print("Ковенанты: {}/{} {}".format(completed, total, item))
-

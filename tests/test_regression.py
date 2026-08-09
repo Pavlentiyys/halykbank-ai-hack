@@ -13,7 +13,7 @@ import pytest
 from cli.commands.score import score
 from model import DatasetRef, Settings, build_pipeline
 
-DATASET = Path(__file__).resolve().parent.parent
+DATASET = Path(__file__).resolve().parent.parent / "public"
 BASELINE = 35.00
 
 

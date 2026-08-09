@@ -10,4 +10,3 @@ def print_fallback_report(submission: Submission) -> None:
     print("Disagreements: {}/{}".format(len(disagreements), len(submission.answers)))
     for answer in disagreements:
         print("  {}/{}".format(answer.scenario_id, answer.covenant_id))
-

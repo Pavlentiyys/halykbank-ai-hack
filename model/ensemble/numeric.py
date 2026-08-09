@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Sequence, Tuple
 
@@ -12,7 +13,14 @@ from model.domain.rules import Direction, compare
 from model.domain.types import BorrowerContext, CovenantTask, Status
 from model.ensemble.estimate import CovenantEstimate
 from model.services.matching import counterparties_match
-from model.services.metrics import by_category, expenses, quarter, sum_abs, sum_to_counterparties
+from model.services.metrics import (
+    by_category,
+    category_from_caption,
+    expenses,
+    quarter,
+    sum_abs,
+    sum_to_counterparties,
+)
 
 
 def _money(value: str) -> Decimal:
@@ -52,8 +60,58 @@ def extract_threshold(text: str) -> Tuple[Optional[Decimal], Optional[Direction]
     return None, None
 
 
+@dataclass(frozen=True)
+class FormulaResult:
+    """A formula outcome, optionally carrying its own limit and verdict."""
+
+    value: Optional[Decimal]
+    rows: Tuple[Txn, ...] = ()
+    note: str = ""
+    threshold: Optional[Decimal] = None
+    direction: Optional[Direction] = None
+    forced: Optional[Status] = None
+
+
 def _amount(grouped: dict, category: str) -> Decimal:
     return sum_abs(expenses(grouped.get(category, ())))
+
+
+def _income(grouped: dict, category: str) -> Decimal:
+    return sum(
+        (txn.amount or Decimal("0") for txn in grouped.get(category, ()) if (txn.amount or 0) > 0),
+        Decimal("0"),
+    )
+
+
+def _limits(text: str) -> Tuple[Decimal, ...]:
+    """Every monetary or ratio limit mentioned in the clause, in order."""
+    compact = " ".join(text.split())
+    found = []
+    for match in re.finditer(r"\$([0-9][0-9,]*(?:\.[0-9]+)?)|([0-9]+\.[0-9]+)x", compact):
+        raw = match.group(1) or match.group(2)
+        found.append(_money(raw))
+    return tuple(found)
+
+
+def _percent(text: str) -> Optional[Decimal]:
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%", " ".join(text.split()))
+    return Decimal(match.group(1)) / Decimal("100") if match else None
+
+
+def _caption_category(text: str) -> str:
+    match = re.search(r"«([^»]{3,60})»", text)
+    return category_from_caption(match.group(1)) if match else "other"
+
+
+def _quarterly_max(rows: Sequence[Txn]) -> Tuple[Decimal, Tuple[Txn, ...]]:
+    best_value = Decimal("0")
+    best_rows: Tuple[Txn, ...] = ()
+    for number in (1, 2, 3, 4):
+        selected = quarter(rows, number)
+        value = sum_abs(expenses(selected)) or _income({"q": selected}, "q")
+        if value > best_value:
+            best_value, best_rows = value, tuple(selected)
+    return best_value, best_rows
 
 
 def _safe_ratio(numerator: Decimal, denominator: Decimal) -> Optional[Decimal]:
@@ -101,6 +159,174 @@ def _status_for_reported_precision(
     return raw_status if mentioned_ids else reported_status
 
 
+def _leverage(
+    grouped: dict,
+    ctx: BorrowerContext,
+    *,
+    addback_cap: Optional[Decimal] = None,
+    plus_debt: Decimal = Decimal("0"),
+    less_debt: Decimal = Decimal("0"),
+) -> Tuple[Optional[Decimal], Tuple[Txn, ...]]:
+    revenue = _income(grouped, "revenue")
+    operating = _amount(grouped, "operating")
+    addback = ctx.metrics.get("one_time_addback", Decimal("0"))
+    if addback_cap is not None:
+        addback = min(addback, addback_cap)
+    ebitda = revenue - operating + addback
+    debt = _income(grouped, "financing") + plus_debt - less_debt
+    rows = (
+        tuple(grouped.get("financing", ()))
+        + tuple(grouped.get("revenue", ()))
+        + tuple(grouped.get("operating", ()))
+    )
+    return _safe_ratio(debt, ebitda), rows
+
+
+def _evaluate_gated(
+    task: CovenantTask,
+    ctx: BorrowerContext,
+    grouped: dict,
+) -> Optional[FormulaResult]:
+    """Springing and dual-condition covenants: the gate and the reported metric differ."""
+    text = task.text.casefold()
+    limits = _limits(task.text)
+    revenue = _income(grouped, "revenue")
+    operating = _amount(grouped, "operating")
+    ebitda = revenue - operating
+    capex = _amount(grouped, "capex")
+    rent = _amount(grouped, "rent")
+    insurance = _amount(grouped, "insurance")
+    interest = _amount(grouped, "interest")
+    personnel = _amount(grouped, "personnel")
+    principal = _amount(grouped, "debt_principal")
+
+    if "двойное условие дефолта" in text:
+        leverage, _ = _leverage(grouped, ctx)
+        gate_ratio = next((value for value in limits if value < 100), Decimal("3.50"))
+        cap = next((value for value in limits if value >= 100), Decimal("2000000"))
+        breached = leverage is not None and leverage > gate_ratio and capex > cap
+        return FormulaResult(
+            capex,
+            tuple(grouped.get("capex", ())),
+            "dual default test: reported capex",
+            threshold=cap,
+            direction="at_most",
+            forced="BREACH" if breached else "COMPLIANT",
+        )
+
+    if "двойной поддерживающий тест" in text:
+        leverage, rows = _leverage(grouped, ctx)
+        cover = _safe_ratio(ebitda, interest)
+        gate_ratio = limits[0] if limits else Decimal("3.25")
+        cover_floor = limits[1] if len(limits) > 1 else Decimal("2.00")
+        breached = (
+            leverage is not None
+            and cover is not None
+            and leverage > gate_ratio
+            and cover < cover_floor
+        )
+        return FormulaResult(
+            leverage,
+            rows,
+            "dual maintenance test: reported leverage",
+            threshold=gate_ratio,
+            direction="at_most",
+            forced="BREACH" if breached else "COMPLIANT",
+        )
+
+    if "условие досрочного погашения" in text:
+        leverage, _ = _leverage(grouped, ctx)
+        dscr = _safe_ratio(ebitda, interest + principal)
+        gate_ratio = limits[0] if limits else Decimal("3.00")
+        dscr_floor = limits[1] if len(limits) > 1 else Decimal("1.30")
+        triggered = (leverage is not None and leverage > gate_ratio) or (
+            dscr is not None and dscr < dscr_floor
+        )
+        rows = (
+            tuple(grouped.get("interest", ()))
+            + tuple(grouped.get("debt_principal", ()))
+            + tuple(grouped.get("revenue", ()))
+        )
+        return FormulaResult(
+            dscr,
+            rows,
+            "cash sweep condition: reported DSCR",
+            threshold=dscr_floor,
+            direction="at_least",
+            forced="BREACH" if triggered else "COMPLIANT",
+        )
+
+    if "transfers to unrestricted subsidiaries" in text:
+        transfers = tuple(grouped.get("subsidiary_transfer", ()))
+        value = sum_abs(expenses(transfers))
+        cap = next((limit for limit in limits if limit >= 100), Decimal("500000"))
+        return FormulaResult(
+            value,
+            transfers,
+            "springing transfer limit",
+            threshold=cap,
+            direction="at_most",
+        )
+
+    if "insurance cover linked to capital expenditure" in text:
+        gate = next((limit for limit in limits if limit >= 1000000), Decimal("1500000"))
+        floor = next((limit for limit in limits if limit < 1000000), Decimal("250000"))
+        rows = tuple(grouped.get("insurance", ())) + tuple(grouped.get("capex", ()))
+        return FormulaResult(
+            insurance,
+            rows,
+            "insurance floor gated on capex",
+            threshold=floor,
+            direction="at_least",
+            forced=None if capex > gate else "COMPLIANT",
+        )
+
+    if "property rental cap with insurance proviso" in text:
+        cap = next((limit for limit in limits if limit >= 1000000), Decimal("1000000"))
+        proviso = next((limit for limit in limits if limit < 1000000), Decimal("200000"))
+        rows = tuple(grouped.get("rent", ())) + tuple(grouped.get("insurance", ()))
+        return FormulaResult(
+            rent,
+            rows,
+            "rental cap with insurance proviso",
+            threshold=cap,
+            direction="at_most",
+            forced="COMPLIANT" if insurance >= proviso else None,
+        )
+
+    if "springing property rental cap" in text:
+        share = _percent(task.text) or Decimal("0.30")
+        cap = next((limit for limit in limits if limit >= 1000), Decimal("900000"))
+        gate_on = revenue > 0 and personnel > share * revenue
+        rows = tuple(grouped.get("rent", ())) + tuple(grouped.get("personnel", ()))
+        return FormulaResult(
+            rent,
+            rows,
+            "springing rental cap",
+            threshold=cap,
+            direction="at_most",
+            forced=None if gate_on else "COMPLIANT",
+        )
+
+    if "с ограничением корректировок ebitda" in text:
+        share = _percent(task.text) or Decimal("0.05")
+        value, rows = _leverage(grouped, ctx, addback_cap=share * revenue)
+        ratio = next((limit for limit in limits if limit < 100), Decimal("3.00"))
+        return FormulaResult(value, rows, "leverage with capped addbacks", threshold=ratio, direction="at_most")
+
+    if "с учётом поручительств" in text:
+        value, rows = _leverage(
+            grouped, ctx, plus_debt=ctx.metrics.get("guarantee_obligations", Decimal("0"))
+        )
+        return FormulaResult(value, rows, "leverage including guarantees")
+
+    if "maximum net debt leverage" in text:
+        value, rows = _leverage(grouped, ctx, less_debt=principal)
+        return FormulaResult(value, rows + tuple(grouped.get("debt_principal", ())), "net debt leverage")
+
+    return None
+
+
 def _evaluate(
     task: CovenantTask,
     ctx: BorrowerContext,
@@ -130,6 +356,61 @@ def _evaluate(
     operating = _amount(grouped, "operating")
     related = sum_to_counterparties(included, ctx.related_parties)
     ebitda = revenue - operating
+    marketing = _amount(grouped, "marketing")
+    consulting = _amount(grouped, "consulting")
+    principal = _amount(grouped, "debt_principal")
+
+    if "коэффициент покрытия обслуживания долга" in text:
+        rows = revenue_rows + grouped.get("operating", ()) + grouped.get("interest", ()) + grouped.get("debt_principal", ())
+        return _safe_ratio(ebitda, interest + principal), tuple(rows), "EBITDA / (interest + principal)"
+    if "коэффициент покрытия постоянных платежей" in text:
+        rows = revenue_rows + grouped.get("operating", ()) + grouped.get("interest", ()) + grouped.get("rent", ())
+        return _safe_ratio(ebitda + rent, interest + rent), tuple(rows), "fixed charge cover"
+    if "minimum fixed overhead cover" in text:
+        rows = revenue_rows + grouped.get("rent", ()) + grouped.get("utilities", ()) + grouped.get("insurance", ())
+        return _safe_ratio(ebitda, rent + utilities + insurance), tuple(rows), "EBITDA / fixed overhead"
+    if "post-personnel operating margin" in text:
+        rows = revenue_rows + grouped.get("personnel", ()) + grouped.get("taxes", ())
+        return _safe_ratio(revenue - personnel - taxes, revenue), tuple(rows), "post-personnel margin"
+    if "fiscal burden ratio" in text:
+        rows = grouped.get("taxes", ()) + grouped.get("interest", ()) + revenue_rows
+        return _safe_ratio(taxes + interest, revenue), tuple(rows), "(taxes + interest) / revenue"
+    if "quarterly revenue concentration" in text:
+        peak, peak_rows = _quarterly_max(revenue_rows)
+        return _safe_ratio(peak, revenue), peak_rows, "peak quarter revenue share"
+    if "консультационных услуг к ebitda" in text:
+        rows = grouped.get("consulting", ()) + revenue_rows + grouped.get("operating", ())
+        return _safe_ratio(consulting, ebitda), tuple(rows), "consulting / EBITDA"
+    if "minimum retained financing proceeds" in text:
+        rows = financing_rows + grouped.get("interest", ()) + grouped.get("taxes", ())
+        return financing - interest - taxes, tuple(rows), "retained financing proceeds"
+    if "вклад в ликвидность" in text or "minimum liquidity contribution" in text:
+        rows = revenue_rows + grouped.get("operating", ()) + financing_rows
+        return ebitda + financing, tuple(rows), "EBITDA + financing"
+    if "запас покрытия постоянных расходов" in text:
+        rows = revenue_rows + grouped.get("operating", ()) + grouped.get("personnel", ()) + grouped.get("rent", ())
+        return revenue - (operating + personnel + rent), tuple(rows), "fixed cost buffer"
+    if "совокупные расходы на содержание помещений" in text:
+        rows = grouped.get("rent", ()) + grouped.get("utilities", ()) + grouped.get("insurance", ())
+        return rent + utilities + insurance, tuple(rows), "occupancy costs"
+    if "разрешённой долговой корзины" in text:
+        undisclosed = ctx.metrics.get("undisclosed_debt", Decimal("0"))
+        return financing + undisclosed, financing_rows, "permitted debt basket"
+    if "капитальных затрат на уровне группы" in text:
+        group_capex = ctx.metrics.get("group_capex")
+        return group_capex, tuple(grouped.get("capex", ())), "group capital expenditure"
+    if "в любом отдельном финансовом квартале" in text and "расход" in text:
+        category = _caption_category(task.text) or "marketing"
+        peak, peak_rows = _quarterly_max(grouped.get(category, ()))
+        return peak, peak_rows, "largest quarterly {} spend".format(category)
+    if "расходы по категории" in text:
+        category = _caption_category(task.text)
+        if category != "other":
+            rows = tuple(grouped.get(category, ()))
+            return sum_abs(expenses(rows)), rows, "{} spend".format(category)
+    if "коэффициент долговой нагрузки" in text or "предельная долговая нагрузка" in text:
+        value, rows = _leverage(grouped, ctx)
+        return value, rows, "financing / EBITDA"
 
     if "четвёрт" in text and "выруч" in text:
         rows = quarter(revenue_rows, 4)
@@ -199,6 +480,21 @@ def _evaluate(
     return None, (), "unsupported formula"
 
 
+def evaluate(
+    task: CovenantTask,
+    ctx: BorrowerContext,
+    transactions: Sequence[Txn],
+) -> FormulaResult:
+    """Single entry point: gated covenants first, then the plain formula bank."""
+    excluded = set(ctx.excluded_txn_ids)
+    included = tuple(txn for txn in transactions if txn.txn_id not in excluded)
+    gated = _evaluate_gated(task, ctx, by_category(included, ctx.category_overrides))
+    if gated is not None:
+        return gated
+    value, rows, note = _evaluate(task, ctx, transactions)
+    return FormulaResult(value=value, rows=rows, note=note)
+
+
 class NumericEstimator:
     name = "numeric"
 
@@ -206,12 +502,15 @@ class NumericEstimator:
         self._settings = settings
 
     def estimate(self, task: CovenantTask, ctx: BorrowerContext) -> CovenantEstimate:
-        threshold, direction = extract_threshold(task.text)
-        actual, selected, notes = _evaluate(task, ctx, ctx.transactions)
+        result = evaluate(task, ctx, ctx.transactions)
+        actual, selected, notes = result.value, result.rows, result.note
+        extracted_threshold, extracted_direction = extract_threshold(task.text)
+        threshold = result.threshold if result.threshold is not None else extracted_threshold
+        direction = result.direction if result.direction is not None else extracted_direction
         if actual is None or threshold is None or direction is None:
             return CovenantEstimate(source=self.name, confidence=0.0, notes=notes)
 
-        status = _status_for_reported_precision(
+        status = result.forced or _status_for_reported_precision(
             actual,
             threshold,
             direction,
@@ -223,7 +522,11 @@ class NumericEstimator:
             " ".join(task.text.split()),
             flags=re.IGNORECASE,
         )
-        if trigger and ctx.metrics.get("financing", Decimal("0")) <= _money(trigger.group(1)):
+        if (
+            result.forced is None
+            and trigger
+            and ctx.metrics.get("financing", Decimal("0")) <= _money(trigger.group(1))
+        ):
             status = "COMPLIANT"
 
         swing = None
@@ -231,7 +534,7 @@ class NumericEstimator:
             candidates = []
             for txn in selected:
                 reduced = tuple(row for row in ctx.transactions if row.txn_id != txn.txn_id)
-                reduced_actual, _, _ = _evaluate(task, ctx, reduced)
+                reduced_actual = evaluate(task, ctx, reduced).value
                 if (
                     reduced_actual is not None
                     and compare(_reported_value(reduced_actual), threshold, direction) != status
