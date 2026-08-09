@@ -9,7 +9,6 @@ from typing import Optional, Sequence
 from .commands.inspect import inspect_command
 from .commands.run import run_command
 from .commands.score import score_command
-from .commands.train import train_command
 from .commands.validate import validate_command
 from .settings import load_settings
 
@@ -38,14 +37,6 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("--scenario", required=True)
     inspect_parser.add_argument("--covenant", required=True)
     _add_runtime_arguments(inspect_parser)
-
-    train_parser = subparsers.add_parser("train", help="prepare semantic SFT data and start MLX LoRA")
-    train_parser.add_argument("--input", type=Path, default=Path("private"))
-    train_parser.add_argument("--data", type=Path, default=Path("artifacts/training-data"))
-    train_parser.add_argument("--adapter", type=Path, default=Path("artifacts/adapters/gemma-covenants"))
-    train_parser.add_argument("--base-model", default="mlx-community/gemma-3-1b-it-4bit")
-    train_parser.add_argument("--iters", type=int, default=50)
-    _add_runtime_arguments(train_parser)
     return parser
 
 
@@ -119,15 +110,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
     if args.command == "inspect":
         return inspect_command(args.input, args.scenario, args.covenant, settings)
-    if args.command == "train":
-        return train_command(
-            args.input,
-            args.data,
-            args.adapter,
-            args.base_model,
-            args.iters,
-            settings,
-        )
     return 2
 
 

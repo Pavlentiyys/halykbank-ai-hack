@@ -14,14 +14,10 @@ dependencies = [
 
 [project.optional-dependencies]
 cli = ["rich>=13,<15"]
-train = [
-  "mlx>=0.25; platform_system == 'Darwin' and platform_machine == 'arm64'",
-  "mlx-lm>=0.24; platform_system == 'Darwin' and platform_machine == 'arm64'",
-]
 dev = ["pytest>=8,<9"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["model", "cli", "training"]
+packages = ["model", "cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

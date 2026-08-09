@@ -10,7 +10,7 @@ from typing import Literal, Optional
 
 @dataclass(frozen=True)
 class GemmaSettings:
-    model_id: str = "gemma-3-27b-it"
+    model_id: str = "gemma4:e2b"
     endpoint: str = "http://localhost:11434"
     temperature: float = 0.0
     max_output_tokens: int = 512
@@ -36,8 +36,9 @@ class Settings:
     max_workers: int = 2
     cache_dir: Optional[Path] = Path(".llm_cache")
     max_context_chars: int = 300_000
+    spec_library: Optional[Path] = Path("artifacts/covenant-specs.json")
     ocr_fallback_enabled: bool = True
     ocr_language: str = "rus+eng"
     team: str = "covenant-agent"
     contact_email: str = "team@example.com"
-    model_name: str = "gemma-3-27b-it + numeric"
+    model_name: str = "gemma4:e2b + numeric"

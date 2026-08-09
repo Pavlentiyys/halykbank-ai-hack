@@ -9,6 +9,8 @@ from model.adapters.llm_cached import CachedLanguageModel
 from model.adapters.llm_gemma import GemmaClient
 from model.adapters.llm_null import NullLanguageModel
 from model.adapters.pdf_pymupdf import PyMuPdfExtractor
+from model.adapters.spec_library import SpecLibrary
+from model.ensemble.synthesized import SynthesizedFormulaEstimator
 from model.config import Settings
 from model.ensemble.ensemble import CovenantEnsemble, make_default_answer
 from model.ensemble.numeric import NumericEstimator
@@ -36,6 +38,14 @@ def build_pipeline(
     estimators = []
     if settings.ensemble.numeric_enabled:
         estimators.append(NumericEstimator(settings.ensemble))
+    if settings.spec_library is not None:
+        estimators.append(
+            SynthesizedFormulaEstimator(
+                llm,
+                settings.ensemble,
+                SpecLibrary(settings.spec_library),
+            )
+        )
     estimators.append(
         SemanticEstimator(llm, settings.ensemble, settings.max_context_chars)
     )

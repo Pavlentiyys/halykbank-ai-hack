@@ -53,9 +53,11 @@ class CovenantPipeline:
         self,
         dataset: DatasetRef,
         progress: Optional[ProgressSink] = None,
+        contexts: Optional[Dict[str, BorrowerContext]] = None,
     ) -> Submission:
         raw_tasks = load_tasks(dataset)
-        contexts = self._context_builder.build_all(dataset, self._documents, self._ledger)
+        if contexts is None:
+            contexts = self._context_builder.build_all(dataset, self._documents, self._ledger)
         tasks = [
             CovenantTask(
                 scenario_id=task.scenario_id,
