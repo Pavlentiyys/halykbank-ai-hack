@@ -1,46 +1,42 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 280" width="1200" height="280" role="img" aria-label="Astrea — Covenant Compliance Agent">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0B1220"/>
-      <stop offset="55%" stop-color="#111E36"/>
-      <stop offset="100%" stop-color="#0A1A2F"/>
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A0A0A"/>
+      <stop offset="60%" stop-color="#111111"/>
+      <stop offset="100%" stop-color="#060806"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#3DDC97"/>
-      <stop offset="100%" stop-color="#4FA9FF"/>
-    </linearGradient>
-    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#4FA9FF" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#4FA9FF" stop-opacity="0"/>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#00C853"/>
+      <stop offset="70%" stop-color="#00C853" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#00C853" stop-opacity="0"/>
     </linearGradient>
   </defs>
 
-  <rect width="1200" height="280" rx="16" fill="url(#bg)"/>
+  <rect width="1200" height="280" rx="16" fill="url(#ink)"/>
+  <rect x="0.5" y="0.5" width="1199" height="279" rx="15.5" fill="none"
+        stroke="#00C853" stroke-opacity="0.22"/>
 
-  <g stroke="#4FA9FF" stroke-opacity="0.10" stroke-width="1">
-    <path d="M760 0V280M860 0V280M960 0V280M1060 0V280"/>
-    <path d="M760 60H1200M760 120H1200M760 180H1200M760 240H1200"/>
+  <g stroke="#FFFFFF" stroke-opacity="0.05" stroke-width="1">
+    <path d="M800 0V280M900 0V280M1000 0V280M1100 0V280"/>
+    <path d="M800 70H1200M800 140H1200M800 210H1200"/>
   </g>
 
-  <g transform="translate(792 84)">
-    <rect width="152" height="14" rx="7" fill="#1E3350"/>
-    <rect width="112" height="14" rx="7" fill="url(#accent)" opacity="0.9"/>
-    <rect y="46" width="152" height="14" rx="7" fill="#1E3350"/>
-    <rect y="46" width="64" height="14" rx="7" fill="url(#accent)" opacity="0.9"/>
-    <rect y="92" width="152" height="14" rx="7" fill="#1E3350"/>
-    <rect y="92" width="148" height="14" rx="7" fill="#FF6B6B" opacity="0.92"/>
-    <path d="M170 99h26" stroke="#FF6B6B" stroke-width="2" stroke-dasharray="4 4"/>
-    <text x="204" y="104" font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
-          font-size="15" fill="#FF6B6B" letter-spacing="1">BREACH</text>
+  <g transform="translate(840 96)">
+    <rect width="180" height="12" rx="6" fill="#FFFFFF" fill-opacity="0.14"/>
+    <rect width="132" height="12" rx="6" fill="#00C853"/>
+    <rect y="38" width="180" height="12" rx="6" fill="#FFFFFF" fill-opacity="0.14"/>
+    <rect y="38" width="74" height="12" rx="6" fill="#00C853"/>
+    <rect y="76" width="180" height="12" rx="6" fill="#FFFFFF" fill-opacity="0.14"/>
+    <rect y="76" width="168" height="12" rx="6" fill="#FFFFFF"/>
   </g>
 
-  <text x="72" y="128" font-family="Georgia,'Times New Roman',serif" font-size="82"
-        font-weight="700" fill="#F2F6FF" letter-spacing="14">ASTREA</text>
-  <rect x="76" y="150" width="300" height="3" rx="1.5" fill="url(#accent)"/>
-  <rect x="376" y="150" width="300" height="3" rx="1.5" fill="url(#fade)"/>
+  <text x="76" y="132" font-family="Georgia,'Times New Roman',serif" font-size="86"
+        font-weight="700" fill="#FFFFFF" letter-spacing="16">ASTREA</text>
 
-  <text x="76" y="196" font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
-        font-size="21" fill="#9FB4D4" letter-spacing="2">Covenant Compliance Agent</text>
-  <text x="76" y="230" font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
-        font-size="15" fill="#6C86AD" letter-spacing="1">Halyk AI Challenge · gemma + numeric ensemble</text>
+  <rect x="80" y="156" width="620" height="3" rx="1.5" fill="url(#rule)"/>
+
+  <text x="80" y="205" font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
+        font-size="22" fill="#00C853" letter-spacing="3">Covenant Compliance Agent</text>
+  <text x="80" y="238" font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
+        font-size="15" fill="#FFFFFF" fill-opacity="0.55" letter-spacing="2">Halyk AI Challenge</text>
 </svg>

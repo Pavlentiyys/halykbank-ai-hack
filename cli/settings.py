@@ -35,13 +35,16 @@ def load_settings(args: Namespace) -> Settings:
 
     model_id = args.gemma_model or value("GEMMA_MODEL_ID", "gemma4:e2b")
     endpoint = args.gemma_endpoint or value("GEMMA_ENDPOINT", "http://localhost:11434")
+    llm_mode = args.llm_mode or value("LLM_MODE", "gaps-only")
+    if llm_mode not in {"gaps-only", "always"}:
+        raise ValueError("LLM_MODE must be gaps-only or always")
     workers = args.workers or int(value("MAX_WORKERS", "1"))
     fx = Decimal(args.fx_eur_usd or value("FX_EUR_USD", "1.00"))
     team = args.team or TEAM_NAME
     email = args.contact_email or CONTACT_EMAIL
     enabled = not args.offline
     gemma = GemmaSettings(model_id=model_id, endpoint=endpoint, enabled=enabled)
-    ensemble = EnsembleSettings(gemma=gemma, fx_eur_usd=fx)
+    ensemble = EnsembleSettings(gemma=gemma, fx_eur_usd=fx, llm_mode=llm_mode)
     return Settings(
         ensemble=ensemble,
         max_workers=workers,

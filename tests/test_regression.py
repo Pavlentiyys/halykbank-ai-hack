@@ -14,7 +14,7 @@ from cli.commands.score import score
 from model import DatasetRef, Settings, build_pipeline
 
 DATASET = Path(__file__).resolve().parent.parent
-BASELINE = 35.00  # из 36; ухудшение — регрессия, улучшение — обновите константу
+BASELINE = 35.00
 
 
 pytestmark = pytest.mark.skipif(

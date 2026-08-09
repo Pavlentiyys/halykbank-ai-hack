@@ -59,6 +59,11 @@ def _add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--gemma-model")
     parser.add_argument("--gemma-endpoint")
+    parser.add_argument(
+        "--llm-mode",
+        choices=("gaps-only", "always"),
+        help="call Gemma only for numeric gaps (default) or for every cell",
+    )
     parser.add_argument("--workers", type=int)
     parser.add_argument("--fx-eur-usd")
     parser.add_argument("--team")

@@ -62,7 +62,6 @@ class PyMuPdfExtractor:
                 check=True,
             )
         except FileNotFoundError:
-            # Единственный раз на экстрактор: дальше просто отдаём пустой текст.
             self._ocr_available = False
             log.warning(
                 "tesseract not found; pages without a text layer stay empty "

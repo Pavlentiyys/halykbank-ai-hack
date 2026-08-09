@@ -55,6 +55,8 @@ class GemmaClient:
         body: Dict[str, Any] = {
             "model": self._settings.model_id,
             "stream": False,
+            "keep_alive": self._settings.keep_alive,
+            "think": self._settings.think,
             "messages": [
                 {"role": "system", "content": request.system},
                 {"role": "user", "content": request.prompt},
@@ -62,13 +64,14 @@ class GemmaClient:
             "options": {
                 "temperature": self._settings.temperature,
                 "num_predict": self._settings.max_output_tokens,
+                "num_ctx": self._settings.num_ctx,
             },
         }
         if request.schema is not None:
             body["format"] = request.schema
 
         last_error = None
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = self._post(endpoint, body)
                 content = str(response.get("message", {}).get("content", ""))
@@ -85,7 +88,7 @@ class GemmaClient:
                 )
             except (HTTPError, URLError, TimeoutError, ValueError) as exc:
                 last_error = exc
-                if attempt < 2:
+                if attempt < 1:
                     time.sleep(2**attempt)
         raise RuntimeError("Gemma request failed after retries") from last_error
 
@@ -99,4 +102,3 @@ class GemmaClient:
         )
         with urlopen(request, timeout=self._settings.request_timeout) as response:
             return json.loads(response.read().decode("utf-8"))
-

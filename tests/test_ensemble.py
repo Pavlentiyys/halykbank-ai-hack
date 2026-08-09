@@ -57,9 +57,6 @@ def _ensemble(*estimators: StubEstimator) -> CovenantEnsemble:
     )
 
 
-# --------------------------------------------------------------- isolation
-
-
 def test_failing_participant_does_not_sink_the_cell() -> None:
     ensemble = _ensemble(
         StubEstimator("gemma", RuntimeError("model is down")),
@@ -105,16 +102,13 @@ def test_empty_ensemble_still_answers() -> None:
     assert _ensemble().analyze(TASK, CONTEXT).is_fallback is True
 
 
-# ------------------------------------------------------------------ policy
-
-
 def test_numeric_wins_the_numbers_and_gemma_the_semantics() -> None:
     answer = NumericAuthoritativePolicy().resolve(TASK, [_gemma(), _numeric()])
 
-    assert answer.status == "BREACH"                    # от numeric
-    assert answer.actual == 283664.18                   # от numeric, по модулю
-    assert answer.quote == "Пункт 6.3"                  # от gemma
-    assert answer.used_document == "8d878af064f2.pdf"   # от gemma
+    assert answer.status == "BREACH"
+    assert answer.actual == 283664.18
+    assert answer.quote == "Пункт 6.3"
+    assert answer.used_document == "8d878af064f2.pdf"
 
 
 def test_numeric_wins_even_with_lower_confidence() -> None:

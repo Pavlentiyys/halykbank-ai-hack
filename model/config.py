@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 
 @dataclass(frozen=True)
@@ -13,9 +13,12 @@ class GemmaSettings:
     model_id: str = "gemma-3-27b-it"
     endpoint: str = "http://localhost:11434"
     temperature: float = 0.0
-    max_output_tokens: int = 2048
+    max_output_tokens: int = 512
     request_timeout: int = 180
+    keep_alive: str = "30m"
+    think: bool = False
     enabled: bool = True
+    num_ctx: int = 32768
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,7 @@ class EnsembleSettings:
     numeric_enabled: bool = True
     fx_eur_usd: Decimal = Decimal("1.00")
     related_party_threshold: Decimal = Decimal("0.20")
+    llm_mode: Literal["gaps-only", "always"] = "gaps-only"
 
 
 @dataclass(frozen=True)

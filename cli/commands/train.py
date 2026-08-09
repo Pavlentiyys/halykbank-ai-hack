@@ -22,8 +22,6 @@ def train_command(
     manifest = prepare_training_data(input_path, data_path, settings)
     print("Training data: {}".format(manifest["splits"]))
     adapter_path.mkdir(parents=True, exist_ok=True)
-    # HF_HOME намеренно не задаём: веса базовой модели место в системном кэше
-    # (~/.cache/huggingface), а не в дереве проекта. Переопределяется извне.
     environment = os.environ.copy()
     command = [
         sys.executable,

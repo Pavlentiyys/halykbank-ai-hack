@@ -33,15 +33,17 @@ def build_pipeline(
     if settings.cache_dir is not None and settings.ensemble.gemma.enabled:
         llm = CachedLanguageModel(llm, settings.cache_dir)
 
-    estimators = [
-        SemanticEstimator(llm, settings.ensemble, settings.max_context_chars),
-    ]
+    estimators = []
     if settings.ensemble.numeric_enabled:
         estimators.append(NumericEstimator(settings.ensemble))
+    estimators.append(
+        SemanticEstimator(llm, settings.ensemble, settings.max_context_chars)
+    )
     ensemble = CovenantEnsemble(
         estimators=estimators,
         policy=NumericAuthoritativePolicy(),
         fallback=make_default_answer,
+        stop_on_complete=settings.ensemble.llm_mode == "gaps-only",
     )
     return CovenantPipeline(
         documents=PyMuPdfExtractor(
